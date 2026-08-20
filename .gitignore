@@ -1,0 +1,81 @@
+# ---- Secrets / local config ----
+.env
+.env.*
+!.env.example
+config/*.local.*
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Local LLM assets (huge binaries, not for git) ----
+models/
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.onnx
+
+# ---- Vendored / built runtime (llama.cpp etc.) ----
+runtime/
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.pdb
+
+# ---- Python bytecode & build artifacts ----
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+MANIFEST
+pip-wheel-metadata/
+
+# ---- Testing / coverage / type checking ----
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# ---- Logs, caches, temp state ----
+*.log
+logs/
+tmp/
+temp/
+.cache/
+
+# ---- Editors / IDEs ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS cruft ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
