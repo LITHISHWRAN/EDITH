@@ -59,6 +59,10 @@ htmlcov/
 dmypy.json
 .ruff_cache/
 
+
+# ---- Tests (kept locally, not published) ----
+tests/
+
 # ---- Logs, caches, temp state ----
 *.log
 logs/
@@ -79,3 +83,4 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
+tests/

@@ -1,2 +1,40 @@
+openai
 pydantic
 python-dotenv
+psutil
+send2trash
+
+# document text extraction for read_file
+pypdf
+python-docx
+
+# Phase 4 -- system control
+winsdk          # WinRT: Wi-Fi/Bluetooth radio state + toggle, no admin
+pycaw
+comtypes
+pyperclip
+
+# Phase 5 -- web
+httpx
+trafilatura
+yt-dlp
+
+# Phase 3 -- voice
+# Benchmarked on this machine before choosing:
+#   TTS  Kokoro (ONNX, CPU)      RTF 0.33, ~470ms for a short reply
+#   STT  moonshine/base          169ms, 0% WER on the command set
+#        (whisper base.en was 483ms and less accurate; GPU unusable --
+#         CTranslate2 wants CUDA 12, the llama.cpp runtime ships CUDA 13)
+kokoro-onnx
+useful-moonshine-onnx
+faster-whisper   # fallback engine for dictation over 64s
+sounddevice
+soundfile
+numpy
+
+# Phase 6 -- scheduling
+APScheduler
+dateparser
+
+# dev
+pytest
