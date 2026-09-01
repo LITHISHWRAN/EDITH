@@ -1,6 +1,5 @@
-import subprocess
-
 from .base import Tool
+from app.tools.launch import spawn
 
 
 class OpenWindowsShellTool(Tool):
@@ -43,13 +42,7 @@ class OpenWindowsShellTool(Tool):
 
         try:
 
-            subprocess.Popen(
-                [
-                    "explorer.exe",
-                    target,
-                ],
-                shell=False,
-            )
+            spawn(["explorer.exe", target])
 
             return {
                 "success": True,

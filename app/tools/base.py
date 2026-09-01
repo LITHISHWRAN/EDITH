@@ -8,6 +8,11 @@ class Tool(ABC):
     description: str
     parameters: dict
 
+    # Consumed by SecurityPolicy, never sent to the model. Keeping it out of
+    # schema() matters: the OpenAI function schema is a strict contract, and
+    # extra keys either get rejected or waste tokens on every single turn.
+    risk: str = "safe"  # safe | sensitive | destructive
+
     @abstractmethod
     def execute(self, **kwargs) -> Any:
         pass

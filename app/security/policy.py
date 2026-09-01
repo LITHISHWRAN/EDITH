@@ -1,27 +1,49 @@
+# app/security/policy.py
+from dataclasses import dataclass
+from pathlib import Path
+
+from app.core.resolver.apps_index import BLOCKED_EXECUTABLES
+
+RISK_SAFE = "safe"
+RISK_SENSITIVE = "sensitive"
+RISK_DESTRUCTIVE = "destructive"
+
+
+@dataclass
+class Decision:
+    allowed: bool
+    reason: str = ""
+    requires_confirmation: bool = False
+
+
 class SecurityPolicy:
     """
-    Central authorization layer for EDITH.
-
-    Tools perform the actual operation.
-    SecurityPolicy decides whether the operation is allowed.
+    Single authorization point. Tools perform operations; this decides
+    whether the operation happens at all, and whether the user must approve.
     """
 
-    def can_execute_application(self, application: str) -> bool:
-        """
-        Check whether EDITH is allowed to launch an application.
+    def can_execute_application(self, application: str, target: str = "") -> Decision:
+        if not isinstance(application, str) or not application.strip():
+            return Decision(False, "Application name is empty.")
 
-        Phase 2:
-        - Reject empty/invalid application names.
-        - Do not maintain a hardcoded application whitelist.
-        - Actual executable resolution is handled by Windows/PATH.
-        """
+        # An application is identified by what it will actually run, not by
+        # the label the model produced. Check the resolved target.
+        executable = Path(target or application).name.lower()
 
-        if not isinstance(application, str):
-            return False
+        if not executable.endswith(".exe"):
+            executable = f"{executable}.exe"
 
-        application = application.strip()
+        if executable in BLOCKED_EXECUTABLES:
+            return Decision(
+                False,
+                f"I'm not allowed to launch {executable}: "
+                "shell and system-administration tools are off limits.",
+            )
 
-        if not application:
-            return False
+        return Decision(True)
 
-        return True
+    def authorize_tool(self, risk: str) -> Decision:
+        if risk == RISK_DESTRUCTIVE:
+            return Decision(True, requires_confirmation=True)
+
+        return Decision(True)

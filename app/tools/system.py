@@ -2,16 +2,64 @@ import os
 import subprocess
 import platform
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from .base import Tool
+from app.core.resolver.apps_index import AppsIndex
+from app.core.resolver.catalog import APP_ALIASES, normalize, similarity
 from app.security.policy import SecurityPolicy
-from app.tools.windows_apps import WindowsAppDiscovery
-from app.tools.windows_launcher import WindowsLauncher
+from app.tools.launch import spawn
+from app.tools.verification import (
+    is_running,
+    snapshot_pids,
+    wait_for_new_process,
+)
 
 
+def _expected_from_app_id(app_id: str) -> str | None:
+    """
+    Guess the executable name of a packaged app from its AppID.
+
+    'Microsoft.WindowsCamera_8wekyb3d8bbwe!App' -> 'windowscamera.exe'.
+    Without this there is nothing to verify against, and any unrelated
+    process starting nearby gets counted as proof the app launched.
+    """
+    family = (app_id or "").split("!", 1)[0]
+    package = family.split("_", 1)[0]
+
+    if "." not in package:
+        return None
+
+    name = package.rsplit(".", 1)[-1].strip()
+
+    return f"{name.lower()}.exe" if name else None
 
 
+class GetCurrentTimeTool(Tool):
+
+    name = "get_current_time"
+
+    description = (
+        "Get the current local time from the computer."
+    )
+
+    parameters = {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": False,
+    }
+
+    def execute(self, **kwargs):
+        current_time = datetime.now()
+        formatted_time = current_time.strftime("%I:%M %p").lstrip("0")
+
+        return {
+            "success": True,
+            "time": formatted_time,
+            "iso_time": current_time.isoformat(timespec="seconds"),
+        }
 
 class SystemInfoTool(Tool):
 
@@ -42,8 +90,17 @@ class SystemInfoTool(Tool):
 
 
 class LaunchApplicationTool(Tool):
+    
+    SPECIAL_LOCATIONS = {
+        "recycle bin": "shell:RecycleBinFolder",
+        "recyclebin": "shell:RecycleBinFolder",
+        "bin": "shell:RecycleBinFolder",
+        "trash": "shell:RecycleBinFolder",
+    }
 
     name = "launch_application"
+
+    risk = "sensitive"
 
     description = (
         "Launch an installed Windows application. "
@@ -67,115 +124,155 @@ class LaunchApplicationTool(Tool):
         "additionalProperties": False,
     }
 
-    def __init__(self):
+    def __init__(self, apps_index: AppsIndex | None = None):
         self.policy = SecurityPolicy()
-        self.windows_apps = WindowsAppDiscovery()
-        self.windows_launcher = WindowsLauncher()
+        # Shared with the router so the PowerShell scan happens once per
+        # session, not once per launch.
+        self.apps = apps_index or AppsIndex()
 
     def execute(self, application: str):
 
-        application = application.strip()
+        application = (application or "").strip()
 
-        print(
-            f"[DEBUG] LaunchApplicationTool: {application}"
-        )
-
-        # -----------------------------------------
-        # 1. Security check
-        # -----------------------------------------
-
-        if not self.policy.can_execute_application(
-            application
-        ):
+        if not application:
             return {
                 "success": False,
-                "error": "Application execution denied.",
+                "error": "No application was specified.",
+            }
+
+        special_location = self.SPECIAL_LOCATIONS.get(
+            normalize(application)
+        )
+
+        if special_location:
+            return self._open_shell_location(special_location)
+
+        # -----------------------------------------
+        # 1. Resolve the name to something real
+        # -----------------------------------------
+
+        entry = self._resolve(application)
+
+        if entry is None:
+            return {
+                "success": False,
+                "application": application,
+                "error": (
+                    f"I could not find an installed application "
+                    f"called '{application}'."
+                ),
             }
 
         # -----------------------------------------
-        # 2. Try normal executable / PATH
+        # 2. Authorize the resolved target
         # -----------------------------------------
 
-        executable = self._find_executable(
-            application
+        decision = self.policy.can_execute_application(
+            application,
+            entry["target"],
         )
 
-        if executable:
+        if not decision.allowed:
+            return {
+                "success": False,
+                "application": entry["name"],
+                "error": decision.reason,
+            }
 
-            print(
-                f"[DEBUG] Resolved executable: {executable}"
-            )
+        # -----------------------------------------
+        # 3. Launch, then look for evidence
+        # -----------------------------------------
 
-            try:
+        expected = (
+            Path(entry["target"]).name
+            if entry["kind"] == "exe"
+            else _expected_from_app_id(entry["target"])
+        )
 
-                subprocess.Popen(
-                    [executable],
-                    shell=False,
+        # Chrome and VS Code open a new window inside the process that is
+        # already running, so no new PID would ever appear. Record that up
+        # front instead of reporting a false failure.
+        already_running = is_running(expected) if expected else False
+
+        before = snapshot_pids()
+
+        try:
+            if entry["kind"] == "exe":
+                spawn(
+                    [entry["target"]],
+                    cwd=str(Path(entry["target"]).parent),
                 )
 
-                return {
-                    "success": True,
-                    "application": application,
-                    "executable": executable,
-                }
+            else:
+                spawn([
+                    "explorer.exe",
+                    "shell:AppsFolder\\" + entry["target"],
+                ])
 
-            except Exception as e:
+        except OSError as error:
+            return {
+                "success": False,
+                "application": entry["name"],
+                "error": str(error),
+            }
 
-                return {
-                    "success": False,
-                    "application": application,
-                    "error": str(e),
-                }
+        if already_running:
+            verification = {
+                "verified": True,
+                "reason": "already-running",
+            }
 
-        # -----------------------------------------
-        # 3. Try Windows registered applications
-        # -----------------------------------------
-
-        app = self.windows_apps.find(
-            application
-        )
-
-        if app:
-
-            print(
-                f"[DEBUG] Resolved Windows app: "
-                f"{app['Name']} -> {app['AppID']}"
+        else:
+            verification = wait_for_new_process(
+                before,
+                expected_name=expected,
+                expected_is_a_guess=entry["kind"] != "exe",
             )
 
-            return self.windows_launcher.launch(
-                app
-            )
-
-        # -----------------------------------------
-        # 4. Nothing found
-        # -----------------------------------------
-
+        # success reports that the launch was issued without error.
+        # verified reports whether we actually observed it come up.
+        # They are different claims and the caller must not conflate them.
         return {
-            "success": False,
-            "application": application,
-            "error": (
-                f"Could not find installed application "
-                f"'{application}'."
-            ),
+            "success": True,
+            "application": entry["name"],
+            "target": entry["target"],
+            **verification,
         }
 
-    def _find_executable(
-        self,
-        application: str,
-    ):
+    # ----------------------------------------------------------
 
-        normalized = application.strip()
+    def _resolve(self, application: str) -> dict | None:
+        query = normalize(application)
+        query = APP_ALIASES.get(query, query)
 
-        candidates = [
-            normalized,
-            f"{normalized}.exe",
-        ]
+        best = None
+        best_score = 0.0
 
-        for candidate in candidates:
+        for entry in self.apps.entries():
+            score = similarity(query, entry["name"])
 
-            result = shutil.which(candidate)
+            if score > best_score:
+                best, best_score = entry, score
 
-            if result:
-                return result
+        if best is None or best_score < 0.72:
+            return None
 
-        return None
+        return best
+
+    @staticmethod
+    def _open_shell_location(target: str) -> dict:
+        try:
+            spawn(["explorer.exe", target])
+
+            return {
+                "success": True,
+                "application": "Recycle Bin",
+                "verified": None,
+            }
+
+        except OSError as error:
+            return {
+                "success": False,
+                "application": "Recycle Bin",
+                "error": str(error),
+            }
